@@ -1,6 +1,8 @@
 package commoble.hyperbox.dimension;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
@@ -12,14 +14,13 @@ import com.mojang.serialization.Codec;
 
 import commoble.hyperbox.Hyperbox;
 import commoble.hyperbox.blocks.ApertureBlock;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Holder;
-import net.minecraft.core.HolderSet;
+import net.minecraft.core.*;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
@@ -29,6 +30,8 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.FixedBiomeSource;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Mirror;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
@@ -37,6 +40,10 @@ import net.minecraft.world.level.levelgen.Heightmap.Types;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.templatesystem.BlockIgnoreProcessor;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
 
 public class HyperboxChunkGenerator extends ChunkGenerator
 {
@@ -89,71 +96,72 @@ public class HyperboxChunkGenerator extends ChunkGenerator
 	}
 
 	@Override
-	public void buildSurface(WorldGenRegion worldGenRegion, StructureManager structureFeatureManager, RandomState random, ChunkAccess chunk)
-	{
-		// set bedrock at the floor and ceiling and walls of the chunk
-		// ceiling y = height-1, so if height==16, ceiling==15
-		// we'll generate bedrock on xz from 0 to 14 rather than from 0 to 15 so sizes of walls are odd numbers
+	public void buildSurface(WorldGenRegion worldGenRegion, StructureManager structureFeatureManager, RandomState random, ChunkAccess chunk) {
 		ChunkPos chunkPos = chunk.getPos();
-		if (chunkPos.equals(CHUNKPOS))
-		{
-			BlockState wallState = Blocks.BEDROCK.defaultBlockState();
-			BlockPos.MutableBlockPos mutaPos = new BlockPos.MutableBlockPos();
-			mutaPos.set(CORNER);
-			int maxHorizontal = 14;
-			int ceilingY = this.getHeight() - 1;
-			for (int xOff=0; xOff<=maxHorizontal; xOff++)
-			{
-				int worldX = CORNER.getX() + xOff;
-				for (int zOff=0; zOff<=maxHorizontal; zOff++)
-				{
-					int worldZ = CORNER.getZ() + zOff;
-					if (xOff == 0 || xOff == maxHorizontal || zOff == 0 || zOff == maxHorizontal)
-					{
-						// generate wall
-						for (int y=1; y<ceilingY; y++)
-						{
-							mutaPos.set(worldX,y,worldZ);
-							chunk.setBlockState(mutaPos, wallState, false);
-						}
-					}
-					// generate floor and ceiling
-					mutaPos.set(worldX, 0, worldZ);
-					chunk.setBlockState(mutaPos, wallState, false);
-					mutaPos.set(worldX, ceilingY, worldZ);
-					chunk.setBlockState(mutaPos, wallState, false);
+		if (chunkPos.equals(CHUNKPOS)) {
+			// Get the StructureTemplateManager from the server level
+			StructureTemplateManager templateManager = worldGenRegion.getLevel().getServer().getStructureManager();
+
+			// Define the location of your structure NBT file
+			ResourceLocation structureLocation = new ResourceLocation("hyperbox", "room3");
+			ResourceLocation structureLocation1 = new ResourceLocation("hyperbox", "room2");
+			Random randomSource = new Random();
+			// Load the structure template
+			Optional<StructureTemplate> optionalTemplate = templateManager.get(structureLocation);
+			Optional<StructureTemplate> optionalTemplate1 = templateManager.get(structureLocation1);
+			int nextRandom = randomSource.nextInt()%2;
+
+			if (optionalTemplate.isPresent() && optionalTemplate1.isPresent()) {
+				if(nextRandom==1) {
+					StructureTemplate template = optionalTemplate.get();
+
+					// Get the size of the structure
+					Vec3i structureSize = template.getSize();
+
+
+					BlockPos placementPos = chunkPos.getWorldPosition();
+
+					// Create placement settings
+					StructurePlaceSettings placementSettings = new StructurePlaceSettings()
+							.setIgnoreEntities(false)
+							.setMirror(Mirror.NONE)
+							.setRotation(Rotation.NONE)
+							.setRandom(worldGenRegion.getRandom())
+							.addProcessor(BlockIgnoreProcessor.STRUCTURE_AND_AIR); // Ignore structure void blocks
+
+					// Place the structure in the world
+					template.placeInWorld(worldGenRegion, placementPos, placementPos, placementSettings, worldGenRegion.getRandom(), 2);
 				}
+				else{
+					StructureTemplate template = optionalTemplate1.get();
+
+					// Get the size of the structure
+					Vec3i structureSize = template.getSize();
+
+
+					BlockPos placementPos = chunkPos.getWorldPosition();
+
+					// Create placement settings
+					StructurePlaceSettings placementSettings = new StructurePlaceSettings()
+							.setIgnoreEntities(false)
+							.setMirror(Mirror.NONE)
+							.setRotation(Rotation.NONE)
+							.setRandom(worldGenRegion.getRandom())
+							.addProcessor(BlockIgnoreProcessor.STRUCTURE_AND_AIR); // Ignore structure void blocks
+
+					// Place the structure in the world
+					template.placeInWorld(worldGenRegion, placementPos, placementPos, placementSettings, worldGenRegion.getRandom(), 2);
+				}
+			} else {
+				// Handle the case where the structure is not found
+				System.err.println("Structure not found: " + structureLocation);
 			}
-			
-			// set the apertures
-			BlockState aperture = Hyperbox.INSTANCE.apertureBlock.get().defaultBlockState();
-			Consumer<Direction> apertureSetter = dir -> chunk.setBlockState(mutaPos, aperture.setValue(ApertureBlock.FACING, dir), false);
-			int centerX = CENTER.getX();
-			int centerY = CENTER.getY();
-			int centerZ = CENTER.getZ();
-			int west = centerX - 7;
-			int east = centerX + 7;
-			int down = centerY - 7;
-			int up = centerY + 7;
-			int north = centerZ - 7;
-			int south = centerZ + 7;
-			
-			mutaPos.set(centerX,up,centerZ);
-			apertureSetter.accept(Direction.DOWN);
-			mutaPos.set(centerX,down,centerZ);
-			apertureSetter.accept(Direction.UP);
-			mutaPos.set(centerX,centerY,south);
-			apertureSetter.accept(Direction.NORTH);
-			mutaPos.set(centerX,centerY,north);
-			apertureSetter.accept(Direction.SOUTH);
-			mutaPos.set(east,centerY,centerZ);
-			apertureSetter.accept(Direction.WEST);
-			mutaPos.set(west,centerY,centerZ);
-			apertureSetter.accept(Direction.EAST);
-			
 		}
 	}
-	
+
+
+
+
 	@Override
 	public void spawnOriginalMobs(WorldGenRegion region)
 	{

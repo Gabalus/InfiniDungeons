@@ -81,7 +81,7 @@ dependencies {
     minecraft "net.minecraftforge:forge:${mc_version}-${forge_version}"
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
-	implementation fg.deobf("commoble.infiniverse:${infiniverse_mc_version}:${infiniverse_version}")
+    implementation fg.deobf("curse.maven:infiniverse-568341:4597298")
 	jarJar(group: "commoble.infiniverse", name: "${infiniverse_mc_version}", version: "[${infiniverse_min_version}, ${infiniverse_max_version})")
 }
 
@@ -115,24 +115,6 @@ reobf {
 tasks.build.dependsOn tasks.jarJar
 jar.finalizedBy('reobfJarJar')
 
-// run "gradlew build publish" to build jars and generate a maven repo for them
-// run "gradlew build" to build the jars without mavening them
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-			artifactId project.archivesBaseName
-            artifact tasks.jarJar
-			//artifact sourcesJar
-			//artifact javadocJar
-        }
-    }
-    repositories {
-        maven {
-			name="localMaven"
-            url "file:///${project.projectDir}/maven"
-        }
-    }
-}
 
 apply plugin: 'org.spongepowered.mixin'
 
