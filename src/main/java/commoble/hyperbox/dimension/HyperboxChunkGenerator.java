@@ -99,65 +99,45 @@ public class HyperboxChunkGenerator extends ChunkGenerator
 	public void buildSurface(WorldGenRegion worldGenRegion, StructureManager structureFeatureManager, RandomState random, ChunkAccess chunk) {
 		ChunkPos chunkPos = chunk.getPos();
 		if (chunkPos.equals(CHUNKPOS)) {
-			// Get the StructureTemplateManager from the server level
 			StructureTemplateManager templateManager = worldGenRegion.getLevel().getServer().getStructureManager();
 
-			// Define the location of your structure NBT file
-			ResourceLocation structureLocation = new ResourceLocation("hyperbox", "room3");
-			ResourceLocation structureLocation1 = new ResourceLocation("hyperbox", "room2");
+			// Fetch the list of rooms from configuration
+			List<String> roomNames = Hyperbox.INSTANCE.commonConfig.roomList.get();
 			Random randomSource = new Random();
-			// Load the structure template
-			Optional<StructureTemplate> optionalTemplate = templateManager.get(structureLocation);
-			Optional<StructureTemplate> optionalTemplate1 = templateManager.get(structureLocation1);
-			int nextRandom = randomSource.nextInt()%2;
 
-			if (optionalTemplate.isPresent() && optionalTemplate1.isPresent()) {
-				if(nextRandom==1) {
+			if (!roomNames.isEmpty()) {
+				// Randomly select a room
+				String selectedRoom = roomNames.get(randomSource.nextInt(roomNames.size()));
+				ResourceLocation structureLocation = new ResourceLocation("hyperbox", selectedRoom);
+
+				// Load the structure template
+				Optional<StructureTemplate> optionalTemplate = templateManager.get(structureLocation);
+
+				if (optionalTemplate.isPresent()) {
 					StructureTemplate template = optionalTemplate.get();
-
-					// Get the size of the structure
 					Vec3i structureSize = template.getSize();
-
-
 					BlockPos placementPos = chunkPos.getWorldPosition();
 
-					// Create placement settings
 					StructurePlaceSettings placementSettings = new StructurePlaceSettings()
 							.setIgnoreEntities(false)
 							.setMirror(Mirror.NONE)
 							.setRotation(Rotation.NONE)
 							.setRandom(worldGenRegion.getRandom())
-							.addProcessor(BlockIgnoreProcessor.STRUCTURE_AND_AIR); // Ignore structure void blocks
+							.addProcessor(BlockIgnoreProcessor.STRUCTURE_AND_AIR);
 
 					// Place the structure in the world
 					template.placeInWorld(worldGenRegion, placementPos, placementPos, placementSettings, worldGenRegion.getRandom(), 2);
-				}
-				else{
-					StructureTemplate template = optionalTemplate1.get();
-
-					// Get the size of the structure
-					Vec3i structureSize = template.getSize();
-
-
-					BlockPos placementPos = chunkPos.getWorldPosition();
-
-					// Create placement settings
-					StructurePlaceSettings placementSettings = new StructurePlaceSettings()
-							.setIgnoreEntities(false)
-							.setMirror(Mirror.NONE)
-							.setRotation(Rotation.NONE)
-							.setRandom(worldGenRegion.getRandom())
-							.addProcessor(BlockIgnoreProcessor.STRUCTURE_AND_AIR); // Ignore structure void blocks
-
-					// Place the structure in the world
-					template.placeInWorld(worldGenRegion, placementPos, placementPos, placementSettings, worldGenRegion.getRandom(), 2);
+				} else {
+					// Handle missing structure case
+					System.err.println("Structure not found: " + structureLocation);
 				}
 			} else {
-				// Handle the case where the structure is not found
-				System.err.println("Structure not found: " + structureLocation);
+				// Handle case where no rooms are defined
+				System.err.println("No rooms defined in configuration.");
 			}
 		}
 	}
+
 
 
 
