@@ -28,7 +28,7 @@ public class HyperboxRenderInfo extends DimensionSpecialEffects
 	@Override
 	public boolean isFoggyAt(int x, int z)
 	{
-		return true;
+		return false;
 	}
 
 }

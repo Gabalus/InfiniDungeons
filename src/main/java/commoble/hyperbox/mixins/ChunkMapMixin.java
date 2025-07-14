@@ -27,9 +27,9 @@ public abstract class ChunkMapMixin implements Supplier<ServerLevel>
 	// normally, it takes the viewDistanceIn, adds 1, and clamps it to the range [3,33]
 	// if the dimension is a hyperbox dimension, our mixin modifies it to 2 instead
 	// (has to be at least two or entities in the same chunk don't render)
-	@ModifyVariable(ordinal=1, method="setViewDistance", at=@At(value = "INVOKE_ASSIGN", target="net/minecraft/util/Mth.clamp (III)I"))
-	public int modifyViewDistance(int viewDistanceIn, int clampedViewDistance)
-	{
-		return MixinCallbacks.modifyChunkManagerViewDistance(this, clampedViewDistance);
-	}
+//	@ModifyVariable(ordinal=1, method="setViewDistance", at=@At(value = "INVOKE_ASSIGN", target="net/minecraft/util/Mth.clamp (III)I"))
+//	public int modifyViewDistance(int viewDistanceIn, int clampedViewDistance)
+//	{
+//		return MixinCallbacks.modifyChunkManagerViewDistance(this, clampedViewDistance);
+//	}
 }

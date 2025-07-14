@@ -23,35 +23,44 @@ public class CommonConfig
 		ResourceManager rm = srv.getResourceManager();
 		Map<String, Map<String, List<String>>> map = new HashMap<>();
 
-		// hyperbox:rooms/<theme>/<difficulty>/<room>.nbt
-		rm.listResources("rooms", rl -> rl.getPath().endsWith(".nbt"))
-				.keySet().forEach(rl ->
-				{
-					String[] parts = rl.getPath().split("/");
-					if (parts.length != 4) return;           // rooms/theme/diff/room.nbt
-					String theme = parts[1];
-					String diff  = parts[2];
-					String room  = parts[3].replace(".nbt", "");
+		// data/hyperbox/structures/rooms/<theme>/<difficulty>/<room>.nbt
+		rm.listResources("structures/rooms", rl -> rl.getPath().endsWith(".nbt"))
+				.keySet()
+				.forEach(rl -> {
+					String rel = rl.getPath()
+							.substring("structures/rooms/".length(), rl.getPath().length() - 4); // trim prefix and ".nbt"
+					String[] parts = rel.split("/");                         // theme / difficulty / room
+					if (parts.length < 3) return;
+
+					String theme = parts[0];
+					String diff  = parts[1];
+
 					map.computeIfAbsent(theme, k -> new HashMap<>())
 							.computeIfAbsent(diff,  k -> new ArrayList<>())
-							.add(room);
+							.add(rel);
 				});
+
 		return map;
 	}
+
+
 
 	public List<String> collectTemplateFolders(MinecraftServer srv)
 	{
 		ResourceManager rm = srv.getResourceManager();
-		Set<String> out = new HashSet<>();
+		Set<String> names = new HashSet<>();
 
-		// hyperbox:world_templates/<template>/region/…
-		rm.listResources("world_templates", rl -> rl.getPath().endsWith(".mca"))
-				.keySet().forEach(rl ->
-				{
-					String[] parts = rl.getPath().split("/");
-					if (parts.length < 3) return;            // world_templates/template/…
-					out.add(parts[1]);                       // имя шаблона
+		// data/hyperbox/structures/world_templates/<template>/<file>.nbt
+		rm.listResources("structures/world_templates", rl -> rl.getPath().endsWith(".nbt"))
+				.keySet()
+				.forEach(rl -> {
+					String rel = rl.getPath().substring("structures/world_templates/".length()); // <template>/…
+					int slash = rel.indexOf('/');
+					if (slash > 0)                    // ensure we have "<template>/something"
+						names.add(rel.substring(0, slash));
 				});
-		return List.copyOf(out);
+
+		return List.copyOf(names);
 	}
+
 }

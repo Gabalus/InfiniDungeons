@@ -1,5 +1,5 @@
 {
-	"logical_height": 16,
+	"logical_height": 384,
 	"infiniburn": "#minecraft:infiniburn_overworld",
 	"effects": "hyperbox:hyperbox",
 	"ambient_light": -0.1,
@@ -8,7 +8,7 @@
 	"min_y": 0,
     "monster_spawn_block_light_limit": 0,
     "monster_spawn_light_level": 0,
-	"height": 16,
+	"height": 384,
 	"natural": false,
 	"coordinate_scale": 1.0,
 	"piglin_safe": false,
