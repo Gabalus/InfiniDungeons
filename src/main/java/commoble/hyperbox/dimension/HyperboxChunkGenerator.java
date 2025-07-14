@@ -123,7 +123,7 @@ public class HyperboxChunkGenerator extends ChunkGenerator
 	{
 		MinecraftServer srv = srvLevel.getServer();
 
-		List<? extends String> templates = Hyperbox.INSTANCE.commonConfig.worldTemplates.get();
+		List<String> templates = Hyperbox.INSTANCE.commonConfig.collectTemplateFolders(server);
 		if (!templates.isEmpty())
 		{
 			String folder = templates.get(srvLevel.random.nextInt(templates.size()));
@@ -162,7 +162,8 @@ public class HyperboxChunkGenerator extends ChunkGenerator
 			return;
 		}
 
-		Map<String,Map<String,List<String>>> themes = Hyperbox.INSTANCE.commonConfig.collectThemePools();
+		Map<String,Map<String,List<String>>> themes =
+				Hyperbox.INSTANCE.commonConfig.collectThemePools(server);
 		if (themes.isEmpty()) return;
 
 		List<String> themeNames = new ArrayList<>(themes.keySet());

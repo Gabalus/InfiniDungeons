@@ -1,63 +1,57 @@
 package commoble.hyperbox;
 
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraftforge.common.ForgeConfigSpec;
-import java.nio.file.*;
+
 import java.util.*;
-import java.util.stream.Stream;
 
 public class CommonConfig
 {
 	public final ForgeConfigSpec.ConfigValue<Boolean> autoForceHyperboxChunks;
-	public final ForgeConfigSpec.ConfigValue<List<? extends String>> worldTemplates;
-	public final ForgeConfigSpec.ConfigValue<List<? extends String>> roomFolders;
-
 
 	public CommonConfig(ForgeConfigSpec.Builder b)
 	{
-		b.push("general").push("world_management");
-
-		autoForceHyperboxChunks = b.define("auto_force_hyperbox_chunks", false);
-
-		worldTemplates = b.defineList("world_templates", List.of(), o -> o instanceof String);
-
-		roomFolders = b.defineList("room_folders", List.of(), o -> o instanceof String);
-
-		b.pop(2);
+		autoForceHyperboxChunks = b
+				.comment("Keep interior chunks force-loaded while parent chunk is loaded")
+				.define("auto_force_hyperbox_chunks", false);
 	}
 
-	public record Entry(String theme,String difficulty,String room) {}
-
-	public Map<String,Map<String,List<String>>> collectThemePools()
+	public Map<String, Map<String, List<String>>> collectThemePools(MinecraftServer srv)
 	{
-		Map<String,Map<String,List<String>>> map = new HashMap<>();
-		Path base = Paths.get("config/hyperbox/rooms");
-		for (String folder : roomFolders.get())
-		{
-			Path themeDir = base.resolve(folder);
-			if (!Files.isDirectory(themeDir)) continue;
-			try (Stream<Path> st = Files.walk(themeDir,3))
-			{
-				st.filter(p -> p.toString().endsWith(".nbt")).forEach(p ->
+		ResourceManager rm = srv.getResourceManager();
+		Map<String, Map<String, List<String>>> map = new HashMap<>();
+
+		// hyperbox:rooms/<theme>/<difficulty>/<room>.nbt
+		rm.listResources("rooms", rl -> rl.getPath().endsWith(".nbt"))
+				.keySet().forEach(rl ->
 				{
-					Path rel = themeDir.relativize(p);
-					if (rel.getNameCount() < 2) return;
-					String diff = rel.getName(0).toString();
-					String name = p.getFileName().toString().replace(".nbt","");
-					map.computeIfAbsent(folder,k->new HashMap<>())
-							.computeIfAbsent(diff,k->new ArrayList<>())
-							.add(name);
+					String[] parts = rl.getPath().split("/");
+					if (parts.length != 4) return;           // rooms/theme/diff/room.nbt
+					String theme = parts[1];
+					String diff  = parts[2];
+					String room  = parts[3].replace(".nbt", "");
+					map.computeIfAbsent(theme, k -> new HashMap<>())
+							.computeIfAbsent(diff,  k -> new ArrayList<>())
+							.add(room);
 				});
-			}
-			catch (Exception ignore) {}
-		}
 		return map;
 	}
 
-	public List<String> collectAllRooms()
+	public List<String> collectTemplateFolders(MinecraftServer srv)
 	{
-		Map<String,Map<String,List<String>>> pools = collectThemePools();
-		List<String> list = new ArrayList<>();
-		pools.forEach((t,dmap)-> dmap.forEach((d,rooms)-> rooms.forEach(r-> list.add(t+"/"+d+"/"+r))));
-		return list;
+		ResourceManager rm = srv.getResourceManager();
+		Set<String> out = new HashSet<>();
+
+		// hyperbox:world_templates/<template>/region/…
+		rm.listResources("world_templates", rl -> rl.getPath().endsWith(".mca"))
+				.keySet().forEach(rl ->
+				{
+					String[] parts = rl.getPath().split("/");
+					if (parts.length < 3) return;            // world_templates/template/…
+					out.add(parts[1]);                       // имя шаблона
+				});
+		return List.copyOf(out);
 	}
 }
