@@ -5,12 +5,7 @@ import java.util.Optional;
 import javax.annotation.Nullable;
 
 import commoble.hyperbox.Hyperbox;
-import commoble.hyperbox.dimension.DelayedTeleportData;
-import commoble.hyperbox.dimension.HyperboxChunkGenerator;
-import commoble.hyperbox.dimension.HyperboxDimension;
-import commoble.hyperbox.dimension.HyperboxWorldData;
-import commoble.hyperbox.dimension.ReturnPointCapability;
-import commoble.hyperbox.dimension.SpawnPointHelper;
+import commoble.hyperbox.dimension.*;
 import commoble.infiniverse.api.InfiniverseAPI;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -235,37 +230,80 @@ public class HyperboxBlockEntity extends BlockEntity implements Nameable
 		}
 	}
 	
-	public void teleportPlayerOrOpenMenu(ServerPlayer serverPlayer, Direction faceActivated)
+//	public void teleportPlayerOrOpenMenu(ServerPlayer serverPlayer, Direction faceActivated)
+//	{
+//		ServerLevel level = serverPlayer.serverLevel();
+//		MinecraftServer server = level.getServer();
+//		ServerLevel targetLevel = this.getLevelIfKeySet(server);
+//		if (targetLevel == null)
+//		{
+//			// if hyperbox doesn't have a dimension bound yet
+//			NetworkHooks.openScreen(serverPlayer, HyperboxMenu.makeServerMenu(this));
+//		}
+//		else
+//		{
+//			// if hyperbox already has a dimension bound
+//			BlockPos pos = this.getBlockPos();
+//			BlockState state = this.getBlockState();
+//			DimensionType hyperboxDimensionType = HyperboxDimension.getDimensionType(server);
+//			if (hyperboxDimensionType != level.dimensionType())
+//			{
+//				serverPlayer.getCapability(ReturnPointCapability.INSTANCE).ifPresent(cap ->{
+//					cap.setReturnPoint(level.dimension(), pos);
+//				});
+//			}
+//			BlockPos posAdjacentToAperture = ((HyperboxBlock)state.getBlock()).getPosAdjacentToAperture(state, faceActivated);
+//			BlockPos spawnPoint = SpawnPointHelper.getBestSpawnPosition(
+//				targetLevel,
+//				posAdjacentToAperture,
+//				HyperboxChunkGenerator.MIN_SPAWN_CORNER,
+//				HyperboxChunkGenerator.MAX_SPAWN_CORNER);
+//			DelayedTeleportData.getOrCreate(serverPlayer.serverLevel()).schedulePlayerTeleport(serverPlayer, targetLevel.dimension(), Vec3.atCenterOf(spawnPoint));
+//		}
+//	}
+
+	public void teleportPlayerOrOpenMenu(ServerPlayer player, Direction face)
 	{
-		ServerLevel level = serverPlayer.serverLevel();
-		MinecraftServer server = level.getServer();
-		ServerLevel targetLevel = this.getLevelIfKeySet(server);
-		if (targetLevel == null)
+		ServerLevel overworld = player.serverLevel();
+		MinecraftServer server = overworld.getServer();
+
+		boolean justCreated = false;
+		if (levelKey.isEmpty())
 		{
-			// if hyperbox doesn't have a dimension bound yet
-			NetworkHooks.openScreen(serverPlayer, HyperboxMenu.makeServerMenu(this));
+			DungeonSpawnData data = DungeonSpawnData.get(server.getLevel(Level.OVERWORLD));
+			ResourceKey<Level> newKey = ResourceKey.create(
+					Registries.DIMENSION,
+					new ResourceLocation(Hyperbox.MODID, "dungeon_" + data.spawnCount));
+
+			setLevelKey(newKey);
+			updateDimensionAfterPlacingBlock();
+			justCreated = true;
 		}
-		else
+
+		ServerLevel dungeon = getLevelIfKeySet(server);
+		if (dungeon == null)
+			return;
+
+		HyperboxWorldData wd = HyperboxWorldData.getOrCreate(dungeon);
+		if (justCreated || wd.isPending() || !wd.isGenerated())
 		{
-			// if hyperbox already has a dimension bound
-			BlockPos pos = this.getBlockPos();
-			BlockState state = this.getBlockState();
-			DimensionType hyperboxDimensionType = HyperboxDimension.getDimensionType(server);
-			if (hyperboxDimensionType != level.dimensionType())
-			{
-				serverPlayer.getCapability(ReturnPointCapability.INSTANCE).ifPresent(cap ->{
-					cap.setReturnPoint(level.dimension(), pos);
-				});
-			}
-			BlockPos posAdjacentToAperture = ((HyperboxBlock)state.getBlock()).getPosAdjacentToAperture(state, faceActivated);
-			BlockPos spawnPoint = SpawnPointHelper.getBestSpawnPosition(
-				targetLevel,
-				posAdjacentToAperture,
-				HyperboxChunkGenerator.MIN_SPAWN_CORNER,
-				HyperboxChunkGenerator.MAX_SPAWN_CORNER);
-			DelayedTeleportData.getOrCreate(serverPlayer.serverLevel()).schedulePlayerTeleport(serverPlayer, targetLevel.dimension(), Vec3.atCenterOf(spawnPoint));
+			player.sendSystemMessage(Component.literal("Данж формируется, попробуйте зайти через несколько секунд"));
+			return;
 		}
+
+		BlockState state = getBlockState();
+		if (HyperboxDimension.getDimensionType(server) != overworld.dimensionType())
+			player.getCapability(ReturnPointCapability.INSTANCE)
+					.ifPresent(c -> c.setReturnPoint(overworld.dimension(), getBlockPos()));
+
+		BlockPos spawn = HyperboxChunkGenerator.CENTER.above();
+
+		DelayedTeleportData.getOrCreate(overworld)
+				.schedulePlayerTeleport(player, dungeon.dimension(), Vec3.atCenterOf(spawn));
 	}
+
+
+
 
 	@Override
 	public void saveAdditional(CompoundTag compound)

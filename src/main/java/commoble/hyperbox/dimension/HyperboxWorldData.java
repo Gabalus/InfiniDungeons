@@ -1,10 +1,7 @@
 package commoble.hyperbox.dimension;
 
 import commoble.hyperbox.Hyperbox;
-import commoble.hyperbox.blocks.ApertureBlockEntity;
-import commoble.hyperbox.blocks.HyperboxBlockEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
@@ -15,84 +12,73 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 
-// WorldSavedData is used for storing extra data in ServerWorld instances
-
-// this class is used for storing information in a hyperbox world
 public class HyperboxWorldData extends SavedData
 {
-	public static final String DATA_KEY = Hyperbox.MODID;
-	public static final String PARENT_WORLD_KEY = "parent_world";
-	public static final String PARENT_POS_KEY = "parent_pos";
-	public static final BlockPos DEFAULT_PARENT_POS = new BlockPos(0,65,0);
-	
-	// ID of the world this hyperbox world's parent block is located in
+	private static final String PENDING      = "pending";
+	private static final String GENERATED    = "generated";
+	private static final String PARENT_WORLD = "parent_world";
+	private static final String PARENT_POS   = "parent_pos";
+
+	private boolean pending;
+	private boolean generated;
+
 	private ResourceKey<Level> parentWorld = Level.OVERWORLD;
-	public ResourceKey<Level> getParentWorld() { return this.parentWorld; }
-	// position of this hyperbox world's parent block
-	private BlockPos parentPos = DEFAULT_PARENT_POS;
-	public BlockPos getParentPos() { return this.parentPos; }
-	
-	public static HyperboxWorldData getOrCreate(ServerLevel world)
+	private BlockPos           parentPos   = BlockPos.ZERO;
+
+	public static HyperboxWorldData getOrCreate(ServerLevel level)
 	{
-		return world.getDataStorage().computeIfAbsent(HyperboxWorldData::load, HyperboxWorldData::create, DATA_KEY);
-	}
-	
-	public static HyperboxWorldData load(CompoundTag nbt)
-	{
-		ResourceKey<Level> parentWorld = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(nbt.getString(PARENT_WORLD_KEY)));
-		BlockPos parentPos = NbtUtils.readBlockPos(nbt.getCompound(PARENT_POS_KEY));
-		return new HyperboxWorldData(parentWorld, parentPos);
-	}
-	
-	public static HyperboxWorldData create()
-	{
-		return new HyperboxWorldData(Level.OVERWORLD, DEFAULT_PARENT_POS);
+		return level.getDataStorage().computeIfAbsent(
+				HyperboxWorldData::load,
+				HyperboxWorldData::new,
+				Hyperbox.MODID);
 	}
 
-	protected HyperboxWorldData(ResourceKey<Level> parentWorld, BlockPos parentPos)
+	private HyperboxWorldData() {}
+
+	public static HyperboxWorldData load(CompoundTag tag)
 	{
-		this.parentWorld = parentWorld;
-		this.parentPos = parentPos;
-	}
-	
-	public void setWorldPos(MinecraftServer server, ServerLevel thisWorld, ResourceKey<Level> thisWorldKey, ResourceKey<Level> parentWorldKey, BlockPos parentPos, int color)
-	{
-		ResourceKey<Level> oldParentWorld = this.parentWorld;
-		BlockPos oldParentPos = this.parentPos;
-		if (!oldParentWorld.equals(parentWorldKey) || !(oldParentPos.equals(parentPos)))
-		{
-			clearOldParent(server, thisWorldKey, oldParentWorld, oldParentPos);
-		}
-		this.parentWorld = parentWorldKey;
-		this.parentPos = parentPos;
-		for (Direction dir : Direction.values())
-		{
-			BlockPos aperturePos = HyperboxChunkGenerator.CENTER.relative(dir, 7);
-			if (thisWorld.getBlockEntity(aperturePos) instanceof ApertureBlockEntity aperture)
-			{
-				aperture.setColor(color);
-			}
-		}
-		this.setDirty();
-	}
-	
-	protected static void clearOldParent(MinecraftServer server, ResourceKey<Level> thisWorldKey, ResourceKey<Level> oldParentKey, BlockPos oldParentPos)
-	{
-		ServerLevel oldParentWorld = server.getLevel(oldParentKey);
-		if (oldParentWorld != null
-			&& oldParentWorld.getBlockEntity(oldParentPos) instanceof HyperboxBlockEntity hyperbox
-			&& hyperbox.getLevelKey().filter(thisWorldKey::equals).isPresent())
-		{
-			oldParentWorld.removeBlock(oldParentPos, true);
-		}
+		HyperboxWorldData d = new HyperboxWorldData();
+		d.pending   = tag.getBoolean(PENDING);
+		d.generated = tag.getBoolean(GENERATED);
+
+		if (tag.contains(PARENT_WORLD))
+			d.parentWorld = ResourceKey.create(
+					Registries.DIMENSION,
+					new ResourceLocation(tag.getString(PARENT_WORLD)));
+
+		if (tag.contains(PARENT_POS))
+			d.parentPos = NbtUtils.readBlockPos(tag.getCompound(PARENT_POS));
+
+		return d;
 	}
 
 	@Override
-	public CompoundTag save(CompoundTag compound)
+	public CompoundTag save(CompoundTag tag)
 	{
-		compound.putString(PARENT_WORLD_KEY, this.parentWorld.location().toString());
-		compound.put(PARENT_POS_KEY, NbtUtils.writeBlockPos(this.parentPos));
-		return compound;
+		tag.putBoolean(PENDING,   pending);
+		tag.putBoolean(GENERATED, generated);
+		tag.putString(PARENT_WORLD, parentWorld.location().toString());
+		tag.put(PARENT_POS, NbtUtils.writeBlockPos(parentPos));
+		return tag;
 	}
 
+	public boolean isPending()           { return pending;   }
+	public boolean isGenerated()         { return generated; }
+	public void    setPending  (boolean b){ pending   = b; setDirty(); }
+	public void    setGenerated(boolean b){ generated = b; setDirty(); }
+
+	public ResourceKey<Level> getParentWorld() { return parentWorld; }
+	public BlockPos           getParentPos()   { return parentPos;   }
+
+	public void setWorldPos(MinecraftServer srv,
+							ServerLevel     thisWorld,
+							ResourceKey<Level> thisKey,
+							ResourceKey<Level> parentKey,
+							BlockPos        parentPosIn,
+							int             color)
+	{
+		parentWorld = parentKey;
+		parentPos   = parentPosIn;
+		setDirty();
+	}
 }

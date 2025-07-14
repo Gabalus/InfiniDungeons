@@ -1,36 +1,63 @@
 package commoble.hyperbox;
 
 import net.minecraftforge.common.ForgeConfigSpec;
-import net.minecraftforge.common.ForgeConfigSpec.ConfigValue;
-import java.util.List;
-import java.util.Arrays;
+import java.nio.file.*;
+import java.util.*;
+import java.util.stream.Stream;
 
-public class CommonConfig {
-	public final ConfigValue<Boolean> autoForceHyperboxChunks;
-	public final ConfigValue<List<String>> roomList;
+public class CommonConfig
+{
+	public final ForgeConfigSpec.ConfigValue<Boolean> autoForceHyperboxChunks;
+	public final ForgeConfigSpec.ConfigValue<List<? extends String>> worldTemplates;
+	public final ForgeConfigSpec.ConfigValue<List<? extends String>> roomFolders;
 
-	public CommonConfig(ForgeConfigSpec.Builder builder) {
-		builder.push("world_management");
 
-		this.autoForceHyperboxChunks = builder
-				.comment(
-						"Enable automatic forceloading of hyperbox chunks.",
-						"While this is enabled, the primary chunks of hyperbox worlds will be kept loaded while the",
-						"parent hyperbox's chunk is loaded, and will be kept unloaded while the parent hyperbox's chunk",
-						"is not loaded.",
-						"If this is disabled, no automatic enabling or disabling of forceloading will be done. In this case,",
-						"hyperbox's interiors will only tick while occupied by a player, or while forceloaded through",
-						"other means.",
-						"Be aware that if this option is changed from true to false while any hyperbox chunks are currently",
-						"forceloaded, they will continue to be forceloaded until those chunks are manually un-forceloaded.")
-				.define("auto_force_hyperbox_chunks", true);
+	public CommonConfig(ForgeConfigSpec.Builder b)
+	{
+		b.push("general").push("world_management");
 
-		this.roomList = builder
-				.comment(
-						"List of room structures available for random selection.",
-						"Add the structure names (without the namespace) of your custom rooms here.")
-				.define("room_list", Arrays.asList("room1", "room2", "room3"));
+		autoForceHyperboxChunks = b.define("auto_force_hyperbox_chunks", false);
 
-		builder.pop();
+		worldTemplates = b.defineList("world_templates", List.of(), o -> o instanceof String);
+
+		roomFolders = b.defineList("room_folders", List.of(), o -> o instanceof String);
+
+		b.pop(2);
+	}
+
+	public record Entry(String theme,String difficulty,String room) {}
+
+	public Map<String,Map<String,List<String>>> collectThemePools()
+	{
+		Map<String,Map<String,List<String>>> map = new HashMap<>();
+		Path base = Paths.get("config/hyperbox/rooms");
+		for (String folder : roomFolders.get())
+		{
+			Path themeDir = base.resolve(folder);
+			if (!Files.isDirectory(themeDir)) continue;
+			try (Stream<Path> st = Files.walk(themeDir,3))
+			{
+				st.filter(p -> p.toString().endsWith(".nbt")).forEach(p ->
+				{
+					Path rel = themeDir.relativize(p);
+					if (rel.getNameCount() < 2) return;
+					String diff = rel.getName(0).toString();
+					String name = p.getFileName().toString().replace(".nbt","");
+					map.computeIfAbsent(folder,k->new HashMap<>())
+							.computeIfAbsent(diff,k->new ArrayList<>())
+							.add(name);
+				});
+			}
+			catch (Exception ignore) {}
+		}
+		return map;
+	}
+
+	public List<String> collectAllRooms()
+	{
+		Map<String,Map<String,List<String>>> pools = collectThemePools();
+		List<String> list = new ArrayList<>();
+		pools.forEach((t,dmap)-> dmap.forEach((d,rooms)-> rooms.forEach(r-> list.add(t+"/"+d+"/"+r))));
+		return list;
 	}
 }

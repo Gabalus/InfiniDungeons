@@ -13,19 +13,16 @@ import commoble.hyperbox.blocks.HyperboxBlockEntity;
 import commoble.hyperbox.blocks.HyperboxBlockItem;
 import commoble.hyperbox.blocks.HyperboxMenu;
 import commoble.hyperbox.client.ClientProxy;
-import commoble.hyperbox.dimension.DelayedTeleportData;
-import commoble.hyperbox.dimension.HyperboxChunkGenerator;
-import commoble.hyperbox.dimension.HyperboxDimension;
-import commoble.hyperbox.dimension.HyperboxWorldData;
-import commoble.hyperbox.dimension.ReturnPointCapability;
-import commoble.hyperbox.dimension.TeleportHelper;
+import commoble.hyperbox.dimension.*;
 import commoble.hyperbox.network.C2SSaveHyperboxPacket;
 import commoble.hyperbox.network.PacketSerializer;
 import commoble.infiniverse.api.InfiniverseAPI;
 import commoble.infiniverse.api.UnregisterDimensionEvent;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -39,6 +36,7 @@ import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
@@ -46,9 +44,11 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.dimension.LevelStem;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.capabilities.RegisterCapabilitiesEvent;
@@ -69,7 +69,15 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.IForgeRegistry;
 import net.minecraftforge.registries.RegistryObject;
 
-// The value here should match an entry in the META-INF/mods.toml file
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.TickEvent.ServerTickEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.server.ServerLifecycleHooks;
+
+import java.util.Random;
+
+import static com.mojang.text2speech.Narrator.LOGGER;
+
 @Mod(Hyperbox.MODID)
 public class Hyperbox
 {
@@ -84,7 +92,6 @@ public class Hyperbox
 		PROTOCOL_VERSION::equals);
 	
 	public static final ResourceLocation HYPERBOX_ID = new ResourceLocation(MODID, Names.HYPERBOX);
-	// keys for the hyperbox dimension stuff
 	public static final ResourceKey<Biome> BIOME_KEY = ResourceKey.create(Registries.BIOME, HYPERBOX_ID);
 	public static final ResourceKey<Level> WORLD_KEY = ResourceKey.create(Registries.DIMENSION, HYPERBOX_ID);
 	public static final ResourceKey<LevelStem> DIMENSION_KEY = ResourceKey.create(Registries.LEVEL_STEM, HYPERBOX_ID);
@@ -92,7 +99,6 @@ public class Hyperbox
 	
 	public final CommonConfig commonConfig;
 	public final RegistryObject<HyperboxBlock> hyperboxBlock;
-	// the placement preview renderer gets the color handler from the player's currently held item instead of the blockstate
 	public final RegistryObject<HyperboxBlock> hyperboxPreviewBlock;
 	public final RegistryObject<ApertureBlock> apertureBlock;
 	public final RegistryObject<BlockItem> hyperboxItem;
@@ -109,8 +115,7 @@ public class Hyperbox
 		IEventBus forgeBus = MinecraftForge.EVENT_BUS;
 		
 		this.commonConfig = ConfigHelper.register(Type.COMMON, CommonConfig::new);
-		
-		// create and set up registrars
+
 		DeferredRegister<SoundEvent> soundEvents = makeVanillaRegister(modBus, Registries.SOUND_EVENT);
 		DeferredRegister<Block> blocks = makeRegister(modBus, ForgeRegistries.BLOCKS);
 		DeferredRegister<Item> items = makeRegister(modBus, ForgeRegistries.ITEMS);
@@ -131,25 +136,93 @@ public class Hyperbox
 		this.hyperboxMenuType = menuTypes.register(Names.HYPERBOX, () -> new MenuType<HyperboxMenu>(HyperboxMenu::makeClientMenu, FeatureFlags.VANILLA_SET));
 		
 		this.hyperboxChunkGeneratorCodec = chunkGeneratorCodecs.register(Names.HYPERBOX, HyperboxChunkGenerator::makeCodec);
-		
-		// subscribe event handlers
+
 		modBus.addListener(this::onRegisterCapabilities);
 		modBus.addListener(this::onBuildTabContents);
 		forgeBus.addListener(this::onUnregisterDimension);
 		forgeBus.addListener(EventPriority.HIGH, this::onHighPriorityWorldTick);
 		forgeBus.addGenericListener(Entity.class, this::onAttachEntityCapabilities);
-		
-		// subscribe client-build event handlers
+
 		if (FMLEnvironment.dist == Dist.CLIENT)
 		{
 			ClientProxy.doClientModInit(modBus, forgeBus);
 		}
-		
-		// register packets
+
 		int id = 0;
 		PacketSerializer.register(id++, CHANNEL, C2SSaveHyperboxPacket.SERIALIZER);
+
+		MinecraftForge.EVENT_BUS.addListener(this::onServerTick);
+
+		MinecraftForge.EVENT_BUS.addListener((net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent e) -> {
+			ServerPlayer sp = (ServerPlayer)e.getEntity();
+			ServerLevel ovw = sp.server.getLevel(Level.OVERWORLD);
+			DungeonSpawnData d = DungeonSpawnData.get(ovw);
+			if (d.pendingMessage != null)
+			{
+				sp.sendSystemMessage(d.pendingMessage);
+				d.pendingMessage = null;
+				d.setDirty();
+			}
+		});
+
 	}
-	
+
+	private void onServerTick(TickEvent.ServerTickEvent event) {
+		if (event.phase != TickEvent.Phase.END) return;
+		MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+		if (server == null) return;
+
+		ServerLevel overworld = server.overworld();
+		DungeonSpawnData data = DungeonSpawnData.get(overworld);
+
+		long day = overworld.getDayTime() / 24000;
+		if (day == data.lastDungeonDay) return;
+
+		data.lastDungeonDay = (int) day;
+		data.spawnCount++;
+
+		if (data.lastY != 0) {
+			BlockPos old = new BlockPos(data.lastX, data.lastY, data.lastZ);
+			if (overworld.getBlockState(old).is(Hyperbox.INSTANCE.hyperboxBlock.get()))
+				overworld.setBlock(old, Blocks.AIR.defaultBlockState(), 3);
+		}
+
+		BlockPos base = overworld.getSharedSpawnPos();
+		int y = overworld.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, base.getX(), base.getZ()) + 1;
+		BlockPos portalPos = new BlockPos(base.getX(), y, base.getZ());
+
+		ChunkPos cp = new ChunkPos(portalPos);
+		overworld.getChunk(cp.x, cp.z);
+
+		boolean placed = overworld.setBlockAndUpdate(portalPos,
+				Hyperbox.INSTANCE.hyperboxBlock.get().defaultBlockState());
+
+		if (placed) {
+			BlockEntity be = overworld.getBlockEntity(portalPos);
+			if (be instanceof HyperboxBlockEntity box)
+				box.updateDimensionAfterPlacingBlock();
+
+			Component msg = Component.literal("Разлом открыт: X=" + portalPos.getX()
+							+ " Y=" + portalPos.getY() + " Z=" + portalPos.getZ())
+					.withStyle(ChatFormatting.LIGHT_PURPLE);
+
+			if (server.getPlayerList().getPlayerCount() == 0)
+				data.pendingMessage = msg;                 // покажем позже
+			else
+				server.getPlayerList().broadcastSystemMessage(msg, false);
+
+			LOGGER.info("[Hyperbox] Portal spawned at {}", portalPos);
+
+			data.lastX = portalPos.getX();
+			data.lastY = portalPos.getY();
+			data.lastZ = portalPos.getZ();
+			data.setDirty();
+		} else {
+			LOGGER.warn("[Hyperbox] Failed to place portal at {}", portalPos);
+		}
+	}
+
+
 	private void onRegisterCapabilities(RegisterCapabilitiesEvent event)
 	{
 		event.register(ReturnPointCapability.class);
