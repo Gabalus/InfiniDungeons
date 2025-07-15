@@ -27,9 +27,9 @@ public abstract class IOWorkerMixin implements Consumer<RegionFileStorage>
 		this.setStorage(cache);
 	}
 	
-	@Inject(method="<init>", at=@At("RETURN"))
-	private void onConstruction(Path path, boolean sync, String threadName, CallbackInfo info)
-	{
-		MixinCallbacks.onIOWorkerConstruction(path, sync, this);
-	}
+//	@Inject(method="<init>", at=@At("RETURN"))
+//	private void onConstruction(Path path, boolean sync, String threadName, CallbackInfo info)
+//	{
+//		MixinCallbacks.onIOWorkerConstruction(path, sync, this);
+//	}
 }
