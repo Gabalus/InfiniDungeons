@@ -1,7 +1,12 @@
 package commoble.hyperbox.blocks;
 
 import commoble.hyperbox.Hyperbox;
-import commoble.hyperbox.dimension.*;
+import commoble.hyperbox.dimension.DelayedTeleportData;
+import commoble.hyperbox.dimension.DungeonSpawnData;
+import commoble.hyperbox.dimension.HyperboxDimension;
+import commoble.hyperbox.dimension.HyperboxWorldData;
+import commoble.hyperbox.dimension.ReturnPointCapability;
+import commoble.hyperbox.dimension.TeleportHelper;
 import commoble.infiniverse.api.InfiniverseAPI;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -15,8 +20,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Nameable;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -25,6 +32,7 @@ import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.util.LazyOptional;
 
 import javax.annotation.Nullable;
+import java.util.EnumSet;
 import java.util.Optional;
 
 public class HyperboxBlockEntity extends BlockEntity implements Nameable {
@@ -36,8 +44,8 @@ public class HyperboxBlockEntity extends BlockEntity implements Nameable {
 	private Optional<ResourceKey<Level>> levelKey = Optional.empty();
 	private Optional<Component> name = Optional.empty();
 	private int color = HyperboxBlockItem.DEFAULT_COLOR;
-	private int[] weakPowerDUNSWE = {0, 0, 0, 0, 0, 0};
-	private int[] strongPowerDUNSWE = {0, 0, 0, 0, 0, 0};
+	private int[] weakPowerDUNSWE = {0,0,0,0,0,0};
+	private int[] strongPowerDUNSWE = {0,0,0,0,0,0};
 
 	public static HyperboxBlockEntity create(BlockPos pos, BlockState state) {
 		return new HyperboxBlockEntity(Hyperbox.INSTANCE.hyperboxBlockEntityType.get(), pos, state);
@@ -53,16 +61,15 @@ public class HyperboxBlockEntity extends BlockEntity implements Nameable {
 			ServerLevel childLevel = this.getLevelIfKeySet(server);
 			if (childLevel == null) return;
 			if (Hyperbox.INSTANCE.commonConfig.autoForceHyperboxChunks.get()) {
-				childLevel.getChunk(HyperboxChunkGenerator.CHUNKPOS.x, HyperboxChunkGenerator.CHUNKPOS.z);
-				childLevel.setChunkForced(HyperboxChunkGenerator.CHUNKPOS.x, HyperboxChunkGenerator.CHUNKPOS.z, true);
-				childLevel.getChunkSource().updateChunkForced(HyperboxChunkGenerator.CHUNKPOS, true);
+				childLevel.getChunk(commoble.hyperbox.dimension.HyperboxChunkGenerator.CHUNKPOS.x, commoble.hyperbox.dimension.HyperboxChunkGenerator.CHUNKPOS.z);
+				childLevel.setChunkForced(commoble.hyperbox.dimension.HyperboxChunkGenerator.CHUNKPOS.x, commoble.hyperbox.dimension.HyperboxChunkGenerator.CHUNKPOS.z, true);
+				childLevel.getChunkSource().updateChunkForced(commoble.hyperbox.dimension.HyperboxChunkGenerator.CHUNKPOS, true);
 			}
 			BlockState thisState = this.getBlockState();
-			Direction[] dirs = Direction.values();
-			for (Direction dir : dirs) thisState.onNeighborChange(this.level, this.worldPosition, this.worldPosition.relative(dir));
+			for (Direction dir : Direction.values()) thisState.onNeighborChange(this.level, this.worldPosition, this.worldPosition.relative(dir));
 			this.level.updateNeighbourForOutputSignal(this.worldPosition, thisState.getBlock());
 			HyperboxBlock.notifyNeighborsOfStrongSignalChange(thisState, childLevel, this.worldPosition);
-			for (Direction sideOfChildLevel : dirs) this.getAperture(server, sideOfChildLevel).ifPresent(aperture -> {
+			for (Direction sideOfChildLevel : Direction.values()) this.getAperture(server, sideOfChildLevel).ifPresent(aperture -> {
 				BlockPos aperturePos = aperture.getBlockPos();
 				aperture.getBlockState().onNeighborChange(aperture.getLevel(), aperturePos, aperturePos.relative(sideOfChildLevel.getOpposite()));
 			});
@@ -136,7 +143,7 @@ public class HyperboxBlockEntity extends BlockEntity implements Nameable {
 			if (thisBlock instanceof HyperboxBlock hyperboxBlock && this.level instanceof ServerLevel serverLevel) {
 				ServerLevel targetLevel = this.getLevelIfKeySet(serverLevel.getServer());
 				if (targetLevel != null) {
-					BlockPos targetPos = hyperboxBlock.getPosAdjacentToAperture(this.getBlockState(), worldSpaceFace);
+					BlockPos targetPos = hyperboxBlock.getPosAdjacentToAperture(thisState, worldSpaceFace);
 					BlockEntity delegateBlockEntity = targetLevel.getBlockEntity(targetPos);
 					if (delegateBlockEntity != null) {
 						Direction rotatedDirection = hyperboxBlock.getOriginalFace(thisState, worldSpaceFace);
@@ -149,7 +156,7 @@ public class HyperboxBlockEntity extends BlockEntity implements Nameable {
 	}
 
 	public Optional<ApertureBlockEntity> getAperture(MinecraftServer server, Direction sideOfChildLevel) {
-		BlockPos aperturePos = HyperboxChunkGenerator.CENTER.relative(sideOfChildLevel, 7);
+		BlockPos aperturePos = commoble.hyperbox.dimension.HyperboxChunkGenerator.CENTER.relative(sideOfChildLevel, 7);
 		ServerLevel targetLevel = this.getLevelIfKeySet(server);
 		return targetLevel == null ? Optional.empty() : targetLevel.getBlockEntity(aperturePos) instanceof ApertureBlockEntity aperture ? Optional.of(aperture) : Optional.empty();
 	}
@@ -167,7 +174,7 @@ public class HyperboxBlockEntity extends BlockEntity implements Nameable {
 				this.strongPowerDUNSWE[originalFaceIndex] = strongPower;
 				this.setChanged();
 				this.level.sendBlockUpdated(this.worldPosition, thisState, thisState, 3);
-				if (net.minecraftforge.event.ForgeEventFactory.onNeighborNotify(this.level, this.worldPosition, thisState, java.util.EnumSet.of(originalFace), true).isCanceled()) return;
+				if (net.minecraftforge.event.ForgeEventFactory.onNeighborNotify(this.level, this.worldPosition, thisState, EnumSet.of(originalFace), true).isCanceled()) return;
 				BlockPos adjacentPos = this.worldPosition.relative(worldSpaceFace);
 				this.level.neighborChanged(adjacentPos, thisBlock, this.worldPosition);
 				this.level.updateNeighborsAtExceptFromFacing(adjacentPos, thisBlock, worldSpaceFace.getOpposite());
@@ -193,10 +200,66 @@ public class HyperboxBlockEntity extends BlockEntity implements Nameable {
 			player.sendSystemMessage(Component.literal("Dungeon is still generating – please try again in a few seconds"));
 			return;
 		}
+		BlockPos base = wd.getSpawnPoint().orElse(dungeon.getSharedSpawnPos());
+		BlockPos safe = findSafeSpawn(dungeon, base, 64, 2);
 		if (HyperboxDimension.getDimensionType(server) != overworld.dimensionType())
 			player.getCapability(ReturnPointCapability.INSTANCE).ifPresent(c -> c.setReturnPoint(overworld.dimension(), getBlockPos()));
-		BlockPos spawn = wd.getSpawnPoint().orElse(HyperboxChunkGenerator.CENTER.above());
-		DelayedTeleportData.getOrCreate(overworld).schedulePlayerTeleport(player, dungeon.dimension(), Vec3.atCenterOf(spawn));
+		ChunkPos cp = new ChunkPos(safe);
+		dungeon.getChunk(cp.x, cp.z);
+		DelayedTeleportData.getOrCreate(overworld).schedulePlayerTeleport(player, dungeon.dimension(), Vec3.atCenterOf(safe));
+	}
+
+	private static BlockPos findSafeSpawn(ServerLevel lvl, BlockPos start, int horizRadius, int vertPad) {
+		ChunkPos scp = new ChunkPos(start);
+		lvl.getChunk(scp.x, scp.z);
+		BlockPos primary = heightmapPos(lvl, start.getX(), start.getZ());
+		if (isSafeSpawnBlock(lvl, primary, vertPad)) return primary;
+		int sx = start.getX();
+		int sz = start.getZ();
+		int r = 1;
+		while (r <= horizRadius) {
+			for (int dx = -r; dx <= r; dx++) {
+				if (Math.abs(dx) != r) continue;
+				BlockPos p1 = heightmapPos(lvl, sx + dx, sz + r);
+				if (isSafeSpawnBlock(lvl, p1, vertPad)) return p1.immutable();
+				BlockPos p2 = heightmapPos(lvl, sx + dx, sz - r);
+				if (isSafeSpawnBlock(lvl, p2, vertPad)) return p2.immutable();
+			}
+			for (int dz = -r+1; dz <= r-1; dz++) {
+				BlockPos p3 = heightmapPos(lvl, sx + r, sz + dz);
+				if (isSafeSpawnBlock(lvl, p3, vertPad)) return p3.immutable();
+				BlockPos p4 = heightmapPos(lvl, sx - r, sz + dz);
+				if (isSafeSpawnBlock(lvl, p4, vertPad)) return p4.immutable();
+			}
+			r++;
+		}
+		int top = lvl.getMaxBuildHeight();
+		int bottom = lvl.getMinBuildHeight();
+		BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos(start.getX(), top, start.getZ());
+		for (int y = top; y >= bottom; --y) {
+			m.setY(y);
+			if (isSafeSpawnBlock(lvl, m, vertPad)) return m.immutable();
+		}
+		return start;
+	}
+
+	private static BlockPos heightmapPos(ServerLevel lvl, int x, int z) {
+		int y = lvl.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+		return new BlockPos(x, y, z);
+	}
+
+	private static boolean isSafeSpawnBlock(ServerLevel lvl, BlockPos pos, int vertPad) {
+		ChunkPos cp = new ChunkPos(pos);
+		if (!lvl.hasChunk(cp.x, cp.z)) lvl.getChunk(cp.x, cp.z);
+		BlockPos below = pos.below();
+		BlockState belowState = lvl.getBlockState(below);
+		boolean sturdy = belowState.isFaceSturdy(lvl, below, Direction.UP) || !belowState.getCollisionShape(lvl, below).isEmpty();
+		if (!sturdy) lvl.setBlock(below, Blocks.STONE.defaultBlockState(), 3);
+		for (int i = 0; i < vertPad; i++) {
+			BlockPos p = pos.above(i);
+			if (!lvl.isEmptyBlock(p)) return false;
+		}
+		return true;
 	}
 
 	@Override

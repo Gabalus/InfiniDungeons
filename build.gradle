@@ -82,6 +82,8 @@ dependencies {
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
     implementation fg.deobf("curse.maven:infiniverse-568341:4597298")
+    implementation fg.deobf("curse.maven:dungeon-crawl-324973:6047153")
+
 	jarJar(group: "commoble.infiniverse", name: "${infiniverse_mc_version}", version: "[${infiniverse_min_version}, ${infiniverse_max_version})")
 }
 

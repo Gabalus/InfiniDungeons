@@ -1,36 +1,39 @@
 package commoble.hyperbox.dimension;
 
+import com.mojang.brigadier.ParseResults;
+import com.mojang.brigadier.StringReader;
 import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Codec;
 import commoble.hyperbox.Hyperbox;
-import net.minecraft.core.*;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderSet;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.*;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.FixedBiomeSource;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.JigsawBlock;
-import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.structure.Structure;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.Difficulty;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-
+import net.minecraftforge.server.ServerLifecycleHooks;
 import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.file.*;
@@ -40,231 +43,255 @@ import java.util.concurrent.Executor;
 import java.util.stream.Stream;
 
 public class HyperboxChunkGenerator extends ChunkGenerator {
-	public static final int BOX_Y = 384;
-	public static final int BOX_XZ = 240;
-	public static final int BASE_Y = 192;
-	public static final ChunkPos CHUNKPOS = new ChunkPos(0, 0);
+	public static final int BOX_XZ = 480;
+	public static final int GROUND_Y = 250;
+	public static final ChunkPos CHUNKPOS = new ChunkPos(0,0);
+	public static final long CHUNKID = CHUNKPOS.toLong();
 	public static final BlockPos CORNER = CHUNKPOS.getWorldPosition();
-	public static final BlockPos CENTER = CORNER.offset(7, 7, 7);
-	private static final int MAX_JIGSAW_STEPS = 2000;
-	private static final BlockState DEAD_END_BLOCK = Blocks.BRICKS.defaultBlockState();
+	public static final BlockPos CENTER = CORNER.offset(7,7,7);
 	private final Holder<Biome> biome;
 	private final MinecraftServer server;
-	public static final long CHUNKID = CHUNKPOS.toLong();
-	private static final BlockState FILLER_BLOCK = Blocks.BEDROCK.defaultBlockState();
+	private final BlockState bedrockBlock;
+	private final BlockState stoneBlock;
+	private final BlockState dirtBlock;
+	private final BlockState grassBlock;
+
+	private static final int STRUCTURE_MIN_COUNT = 8;
+	private static final int STRUCTURE_MAX_TRIES = 64;
+	private static final int STRUCTURE_MARGIN_BLOCKS = 16;
+	private static final int STRUCTURE_FORCE_RADIUS_BLOCKS = 256;
+	private static final int STRUCTURE_SEPARATION_BLOCKS = 96;
 
 	public static Codec<HyperboxChunkGenerator> makeCodec() {
-		return Biome.CODEC.fieldOf("biome").xmap(HyperboxChunkGenerator::new, HyperboxChunkGenerator::biome).codec();
+		return Biome.CODEC.fieldOf("biome").xmap(HyperboxChunkGenerator::new,HyperboxChunkGenerator::biome).codec();
 	}
 
 	public HyperboxChunkGenerator(MinecraftServer srv) {
 		super(new FixedBiomeSource(srv.overworld().getBiome(BlockPos.ZERO)));
-		server = srv;
-		biome = srv.overworld().getBiome(BlockPos.ZERO);
+		this.server = srv;
+		this.biome = srv.overworld().getBiome(BlockPos.ZERO);
+		this.bedrockBlock = Hyperbox.INSTANCE.commonConfig.bedrockBlock(srv);
+		this.stoneBlock = Hyperbox.INSTANCE.commonConfig.stoneBlock(srv);
+		this.dirtBlock = Hyperbox.INSTANCE.commonConfig.dirtBlock(srv);
+		this.grassBlock = Hyperbox.INSTANCE.commonConfig.grassBlock(srv);
 	}
 
 	public HyperboxChunkGenerator(Holder<Biome> b) {
 		super(new FixedBiomeSource(b));
-		biome = b;
-		server = null;
+		this.biome = b;
+		this.server = ServerLifecycleHooks.getCurrentServer();
+		MinecraftServer srv = this.server;
+		if (srv==null) {
+			this.bedrockBlock = net.minecraft.world.level.block.Blocks.BEDROCK.defaultBlockState();
+			this.stoneBlock = net.minecraft.world.level.block.Blocks.STONE.defaultBlockState();
+			this.dirtBlock = net.minecraft.world.level.block.Blocks.DIRT.defaultBlockState();
+			this.grassBlock = net.minecraft.world.level.block.Blocks.GRASS_BLOCK.defaultBlockState();
+		} else {
+			this.bedrockBlock = Hyperbox.INSTANCE.commonConfig.bedrockBlock(srv);
+			this.stoneBlock = Hyperbox.INSTANCE.commonConfig.stoneBlock(srv);
+			this.dirtBlock = Hyperbox.INSTANCE.commonConfig.dirtBlock(srv);
+			this.grassBlock = Hyperbox.INSTANCE.commonConfig.grassBlock(srv);
+		}
 	}
 
-	public Holder<Biome> biome() {
-		return biome;
-	}
+	public Holder<Biome> biome() { return this.biome; }
 
 	@Override
-	protected Codec<? extends ChunkGenerator> codec() {
-		return Hyperbox.INSTANCE.hyperboxChunkGeneratorCodec.get();
-	}
+	protected Codec<? extends ChunkGenerator> codec() { return Hyperbox.INSTANCE.hyperboxChunkGeneratorCodec.get(); }
+
+	@Override public void applyCarvers(WorldGenRegion r,long s,RandomState rs,net.minecraft.world.level.biome.BiomeManager bm,StructureManager sm,ChunkAccess c,GenerationStep.Carving g) {}
+	@Override public void spawnOriginalMobs(WorldGenRegion r) {}
+	@Override public int getGenDepth() { MinecraftServer srv = sampleServer(); return srv==null?384:srv.overworld().getMaxBuildHeight()-srv.overworld().getMinBuildHeight(); }
+	@Override public int getSeaLevel() { MinecraftServer srv = sampleServer(); return srv==null?0:srv.overworld().getSeaLevel(); }
+	@Override public int getMinY() { MinecraftServer srv = sampleServer(); return srv==null?0:srv.overworld().getMinBuildHeight(); }
+	@Override public int getBaseHeight(int x,int z,Heightmap.Types t,LevelHeightAccessor l,RandomState rs) { return GROUND_Y+1; }
+	@Override public NoiseColumn getBaseColumn(int x,int z,LevelHeightAccessor l,RandomState rs) { return new NoiseColumn(GROUND_Y+1,new BlockState[0]); }
+	@Override public void addDebugScreenInfo(List<String> l,RandomState rs,BlockPos p) {}
+	@Nullable @Override public Pair<BlockPos,Holder<Structure>> findNearestMapStructure(ServerLevel l,HolderSet<Structure> s,BlockPos p,int r,boolean k) { return null; }
+	@Override public void applyBiomeDecoration(WorldGenLevel w,ChunkAccess c,StructureManager sm) {}
+	@Override public int getSpawnHeight(LevelHeightAccessor l) { return GROUND_Y+1; }
+	@Override public void createReferences(WorldGenLevel w,StructureManager sm,ChunkAccess c) {}
+	@Override public CompletableFuture<ChunkAccess> fillFromNoise(Executor e,Blender b,RandomState rs,StructureManager sm,ChunkAccess c) { return CompletableFuture.completedFuture(c); }
 
 	@Override
-	public void applyCarvers(WorldGenRegion r, long s, RandomState rs, net.minecraft.world.level.biome.BiomeManager bm, StructureManager sm, ChunkAccess c, GenerationStep.Carving g) {
-	}
-
-	@Override
-	public void spawnOriginalMobs(WorldGenRegion r) {
-	}
-
-	@Override
-	public int getGenDepth() {
-		return BOX_Y;
-	}
-
-	@Override
-	public int getSeaLevel() {
-		return 0;
-	}
-
-	@Override
-	public int getMinY() {
-		return 0;
-	}
-
-	@Override
-	public int getBaseHeight(int x, int z, Heightmap.Types t, LevelHeightAccessor l, RandomState rs) {
-		return 0;
-	}
-
-	@Override
-	public NoiseColumn getBaseColumn(int x, int z, LevelHeightAccessor l, RandomState rs) {
-		return new NoiseColumn(0, new BlockState[0]);
-	}
-
-	@Override
-	public void addDebugScreenInfo(List<String> l, RandomState rs, BlockPos p) {
-	}
-
-	@Nullable
-	@Override
-	public Pair<BlockPos, Holder<Structure>> findNearestMapStructure(ServerLevel l, HolderSet<Structure> s, BlockPos p, int r, boolean k) {
-		return null;
-	}
-
-	@Override
-	public void applyBiomeDecoration(WorldGenLevel w, ChunkAccess c, StructureManager sm) {
-	}
-
-	@Override
-	public int getSpawnHeight(LevelHeightAccessor l) {
-		return 1;
-	}
-
-	@Override
-	public void createReferences(WorldGenLevel w, StructureManager sm, ChunkAccess c) {
-	}
-
-	@Override
-	public CompletableFuture<ChunkAccess> fillFromNoise(Executor e, Blender b, RandomState rs, StructureManager sm, ChunkAccess c) {
-		return CompletableFuture.completedFuture(c);
-	}
-
-	@Override
-	public void buildSurface(WorldGenRegion region, StructureManager sm, RandomState rs, ChunkAccess chunk) {
-
-		fillChunkWithBedrock(region, chunk);
-
+	public void buildSurface(WorldGenRegion region,StructureManager sm,RandomState rs,ChunkAccess chunk) {
+		fillChunkLimitedWorld(region,chunk,this.bedrockBlock,this.stoneBlock,this.dirtBlock,this.grassBlock);
 		if (!chunk.getPos().equals(CHUNKPOS)) return;
 		HyperboxWorldData d = HyperboxWorldData.getOrCreate(region.getLevel());
 		if (!d.isGenerated() && !d.isPending()) d.setPending(true);
 	}
 
-	private static void fillChunkWithBedrock(WorldGenRegion region, ChunkAccess chunk) {
+	private static void fillChunkLimitedWorld(WorldGenRegion region,ChunkAccess chunk,BlockState bedrockBlock,BlockState stoneBlock,BlockState dirtBlock,BlockState grassBlock) {
 		int minY = region.getMinBuildHeight();
-		int maxY = region.getMaxBuildHeight();
+		int maxY = region.getMaxBuildHeight()-1;
 		int chunkMinX = chunk.getPos().getMinBlockX();
 		int chunkMinZ = chunk.getPos().getMinBlockZ();
+		int chunkMaxX = chunkMinX+15;
+		int chunkMaxZ = chunkMinZ+15;
+		int maxX = CORNER.getX()+BOX_XZ-1;
+		int maxZ = CORNER.getZ()+BOX_XZ-1;
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-
-		for (int x = 0; x < 16; x++) {
-			for (int z = 0; z < 16; z++) {
-				for (int y = minY; y <= maxY; y++) {
-					region.setBlock(pos.set(chunkMinX + x, y, chunkMinZ + z),
-							FILLER_BLOCK,
-							2);
+		for (int x=chunkMinX;x<=chunkMaxX;x++) {
+			for (int z=chunkMinZ;z<=chunkMaxZ;z++) {
+				boolean inside = x>=CORNER.getX() && x<=maxX && z>=CORNER.getZ() && z<=maxZ;
+				if (!inside) {
+					for (int y=minY;y<=maxY;y++) region.setBlock(pos.set(x,y,z),net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(),2);
+				} else {
+					for (int y=minY;y<=maxY;y++) {
+						BlockState s;
+						if (y==minY) s=bedrockBlock;
+						else if (y>minY && y<GROUND_Y-3) s=stoneBlock;
+						else if (y>=GROUND_Y-3 && y<GROUND_Y-1) s=dirtBlock;
+						else if (y==GROUND_Y-1) s=dirtBlock;
+						else if (y==GROUND_Y) s=grassBlock;
+						else s=net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+						region.setBlock(pos.set(x,y,z),s,2);
+					}
 				}
 			}
 		}
 	}
 
-	@Mod.EventBusSubscriber(modid = Hyperbox.MODID)
+	@Mod.EventBusSubscriber(modid=Hyperbox.MODID)
 	public static class TickHandler {
 		@SubscribeEvent
 		public static void onLevelTick(TickEvent.LevelTickEvent e) {
-			if (e.phase != TickEvent.Phase.END) return;
+			if (e.phase!=TickEvent.Phase.END) return;
 			if (!(e.level instanceof ServerLevel lvl)) return;
-			if (lvl.dimensionType() != HyperboxDimension.getDimensionType(lvl.getServer())) return;
+			if (lvl.dimensionType()!=HyperboxDimension.getDimensionType(lvl.getServer())) return;
 			HyperboxWorldData d = HyperboxWorldData.getOrCreate(lvl);
 			if (!d.isPending() || d.isGenerated()) return;
-			HyperboxChunkGenerator.generateDungeonNow(lvl);
+			HyperboxChunkGenerator.generateNow(lvl);
 			d.setGenerated(true);
 			d.setPending(false);
 		}
 	}
 
-	public static void generateDungeonNow(ServerLevel level) {
-		new HyperboxChunkGenerator(level.getServer()).generateDungeonLayout(level);
+	public static void generateNow(ServerLevel targetLevel) {
+		new HyperboxChunkGenerator(targetLevel.getServer()).spawnConfiguredStructure(targetLevel);
 	}
 
-	private void generateDungeonLayout(ServerLevel lvl) {
+	private void spawnConfiguredStructure(ServerLevel lvl) {
 		MinecraftServer srv = lvl.getServer();
-		List<String> templates = Hyperbox.INSTANCE.commonConfig.collectTemplateFolders(srv);
-		if (!templates.isEmpty()) {
-			copyFullTemplateWorld(lvl, templates.get(lvl.random.nextInt(templates.size())));
-			return;
-		}
-		Map<String, Map<String, List<String>>> themes = Hyperbox.INSTANCE.commonConfig.collectThemePools(srv);
-		if (themes.isEmpty()) return;
-		List<String> themeNames = new ArrayList<>(themes.keySet());
-		Collections.shuffle(themeNames, new Random());
-		String theme = themeNames.get(0);
-		List<String> pool = new ArrayList<>(themes.get(theme).values().stream().flatMap(Collection::stream).toList());
-		StructureTemplateManager tm = lvl.getStructureManager();
-		pool.removeIf(id -> tm.get(asRoomId(id)).map(t -> t.getSize().getY() > BOX_Y).orElse(true));
-		if (pool.isEmpty()) return;
-		RandomSource rand = RandomSource.create();
-		Set<ChunkPos> occ = new HashSet<>();
-		class Conn { BlockPos p; Direction d; Conn(BlockPos p, Direction d) { this.p = p; this.d = d; } }
-		List<Conn> open = new ArrayList<>();
-		String startId = pool.get(rand.nextInt(pool.size()));
-		StructureTemplate startTemplate = tm.getOrCreate(asRoomId(startId));
-		Vec3i startSize = startTemplate.getSize();
-		int dx = Math.max(0, (startSize.getX() - BOX_XZ) / 2);
-		int dz = Math.max(0, (startSize.getZ() - BOX_XZ) / 2);
-		BlockPos origin = new BlockPos(CORNER.getX() + 1 - dx, BASE_Y, CORNER.getZ() + 1 - dz);
-		StructurePlaceSettings ps = new StructurePlaceSettings().setIgnoreEntities(false).setRandom(rand);
-		loadChunksForTemplate(lvl, origin, startSize);
-		startTemplate.placeInWorld(lvl, origin, origin, ps, rand, 2);
-		markChunks(occ, origin, startSize);
-		startTemplate.filterBlocks(origin, ps, Blocks.JIGSAW).forEach(b -> {
-			lvl.setBlock(b.pos(), Blocks.AIR.defaultBlockState(), 3);
-			open.add(new Conn(b.pos(), b.state().getValue(JigsawBlock.ORIENTATION).front()));
-		});
-		BlockPos spawnPos = origin.offset(startSize.getX() / 2, 1, startSize.getZ() / 2);
-		HyperboxWorldData.getOrCreate(lvl).setSpawnPoint(spawnPos);
-		Random jrand = new Random();
-		int placed = 1;
-		while (!open.isEmpty() && placed < MAX_JIGSAW_STEPS) {
-			Conn c = open.remove(0);
-			Direction need = c.d;
-			Collections.shuffle(pool, jrand);
-			for (String id : pool) {
-				Optional<StructureTemplate> opt = tm.get(asRoomId(id));
-				if (opt.isEmpty()) continue;
-				StructureTemplate t = opt.get();
-				for (Rotation rot : Rotation.values()) {
-					StructurePlaceSettings probe = new StructurePlaceSettings().setRotation(rot);
-					List<StructureTemplate.StructureBlockInfo> jigs = t.filterBlocks(BlockPos.ZERO, probe, Blocks.JIGSAW);
-					StructureTemplate.StructureBlockInfo exit = jigs.stream().filter(j -> j.state().getValue(JigsawBlock.ORIENTATION).front() == need.getOpposite()).findFirst().orElse(null);
-					if (exit == null) continue;
-					BlockPos newOrg = c.p.subtract(exit.pos());
-					Vec3i s = t.getSize(rot);
-					if (s.getX() > BOX_XZ || s.getZ() > BOX_XZ || s.getY() > BOX_Y) continue;
-					if (intersects(occ, newOrg, s)) continue;
-					loadChunksForTemplate(lvl, newOrg, s);
-					StructurePlaceSettings place = new StructurePlaceSettings().setRotation(rot).setRandom(rand);
-					t.placeInWorld(lvl, newOrg, newOrg, place, rand, 2);
-					placed++;
-					markChunks(occ, newOrg, s);
-					t.filterBlocks(newOrg, place, Blocks.JIGSAW).forEach(b -> {
-						lvl.setBlock(b.pos(), Blocks.AIR.defaultBlockState(), 3);
-						if (!b.pos().equals(c.p)) open.add(new Conn(b.pos(), b.state().getValue(JigsawBlock.ORIENTATION).front()));
-					});
-					break;
-				}
-				if (placed >= MAX_JIGSAW_STEPS) break;
+		Difficulty diff = lvl.getDifficulty();
+		List<ResourceLocation> pool = Hyperbox.INSTANCE.commonConfig.getStructurePoolForDifficulty(diff);
+		if (pool.isEmpty()) pool = Hyperbox.INSTANCE.commonConfig.getStructurePoolForDifficulty(net.minecraft.world.Difficulty.NORMAL);
+		if (pool.isEmpty()) pool = List.of(new ResourceLocation("dungeoncrawl","dungeon"));
+		RandomSource rand = lvl.random;
+
+		int minX = CORNER.getX();
+		int minZ = CORNER.getZ();
+		int maxX = CORNER.getX() + BOX_XZ - 1;
+		int maxZ = CORNER.getZ() + BOX_XZ - 1;
+
+		List<BlockPos> placedCenters = new ArrayList<>();
+		int placed = 0;
+
+		BlockPos first = new BlockPos(CORNER.getX()+BOX_XZ/2, GROUND_Y-4, CORNER.getZ()+BOX_XZ/2);
+		forceBoxChunks(lvl, first, STRUCTURE_FORCE_RADIUS_BLOCKS);
+		placeStructureCommand(lvl, srv, pool.get(rand.nextInt(pool.size())), first);
+		placedCenters.add(first);
+		placed++;
+
+		while (placed < STRUCTURE_MIN_COUNT) {
+			boolean success = false;
+			for (int attempt=0; attempt<STRUCTURE_MAX_TRIES; attempt++) {
+				int spanX = Math.max(1, BOX_XZ - STRUCTURE_MARGIN_BLOCKS*2);
+				int spanZ = Math.max(1, BOX_XZ - STRUCTURE_MARGIN_BLOCKS*2);
+				int x = minX + STRUCTURE_MARGIN_BLOCKS + rand.nextInt(spanX);
+				int z = minZ + STRUCTURE_MARGIN_BLOCKS + rand.nextInt(spanZ);
+				int y = lvl.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+				BlockPos pos = new BlockPos(x, y, z);
+
+				if (!isFarEnough(pos, placedCenters, STRUCTURE_SEPARATION_BLOCKS)) continue;
+
+				forceBoxChunks(lvl, pos, STRUCTURE_FORCE_RADIUS_BLOCKS);
+				placeStructureCommand(lvl, srv, pool.get(rand.nextInt(pool.size())), pos);
+				placedCenters.add(pos);
+				placed++;
+				success = true;
+				break;
+			}
+			if (!success) {
+				int x = minX + rand.nextInt(Math.max(1, BOX_XZ));
+				int z = minZ + rand.nextInt(Math.max(1, BOX_XZ));
+				int y = lvl.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+				BlockPos pos = new BlockPos(x, y, z);
+				forceBoxChunks(lvl, pos, STRUCTURE_FORCE_RADIUS_BLOCKS);
+				placeStructureCommand(lvl, srv, pool.get(rand.nextInt(pool.size())), pos);
+				placedCenters.add(pos);
+				placed++;
 			}
 		}
-		for (Conn dead : open) lvl.setBlock(dead.p, DEAD_END_BLOCK, 3);
-		occ.forEach(cp -> lvl.setChunkForced(cp.x, cp.z, false));
-		sealBox(lvl, occ);
+
+		BlockPos spawn = placedCenters.get(0).above();
+		lvl.setDefaultSpawnPos(spawn, 0F);
+		HyperboxWorldData.getOrCreate(lvl).setSpawnPoint(spawn);
 	}
 
-	private static ResourceLocation asRoomId(String id) {
-		return new ResourceLocation(Hyperbox.MODID, "rooms/" + id);
+
+	private static boolean isFarEnough(BlockPos candidate, List<BlockPos> existing, int minDistSqRoot) {
+		int minDistSq = minDistSqRoot * minDistSqRoot;
+		for (BlockPos p : existing) {
+			int dx = candidate.getX() - p.getX();
+			int dz = candidate.getZ() - p.getZ();
+			int distSq = dx*dx + dz*dz;
+			if (distSq < minDistSq) return false;
+		}
+		return true;
 	}
 
-	private void copyFullTemplateWorld(ServerLevel lvl, String folder) {
+	private static void forceBoxChunks(ServerLevel lvl, BlockPos center, int radiusBlocks) {
+		int minX = center.getX() - radiusBlocks;
+		int minZ = center.getZ() - radiusBlocks;
+		int maxX = center.getX() + radiusBlocks;
+		int maxZ = center.getZ() + radiusBlocks;
+		int minChunkX = minX >> 4;
+		int minChunkZ = minZ >> 4;
+		int maxChunkX = maxX >> 4;
+		int maxChunkZ = maxZ >> 4;
+		for (int cx=minChunkX; cx<=maxChunkX; cx++) {
+			for (int cz=minChunkZ; cz<=maxChunkZ; cz++) {
+				lvl.setChunkForced(cx, cz, true);
+				// ensure FULL status
+				lvl.getChunk(cx, cz);
+			}
+		}
+	}
+
+	private static void placeStructureCommand(ServerLevel lvl, MinecraftServer srv, ResourceLocation id, BlockPos pos) {
+		String cmd = "place structure " + id + " " + pos.getX() + " " + pos.getY() + " " + pos.getZ();
+		CommandSourceStack css = srv.createCommandSourceStack().withLevel(lvl).withSuppressedOutput().withPermission(4);
+		ParseResults<CommandSourceStack> parsed = srv.getCommands().getDispatcher().parse(new StringReader(cmd), css);
+		srv.getCommands().performCommand(parsed, cmd);
+	}
+
+
+
+
+	private static void forceAreaChunks(ServerLevel lvl,BlockPos center,int boxSizeBlocks) {
+		int half = boxSizeBlocks/2;
+		int minX = center.getX()-half;
+		int minZ = center.getZ()-half;
+		int maxX = center.getX()+half;
+		int maxZ = center.getZ()+half;
+		int minChunkX = minX>>4;
+		int minChunkZ = minZ>>4;
+		int maxChunkX = maxX>>4;
+		int maxChunkZ = maxZ>>4;
+		for (int cx=minChunkX;cx<=maxChunkX;cx++) {
+			for (int cz=minChunkZ;cz<=maxChunkZ;cz++) {
+				lvl.setChunkForced(cx,cz,true);
+				lvl.getChunk(cx,cz);
+			}
+		}
+	}
+
+	private static MinecraftServer sampleServer() { return ServerLifecycleHooks.getCurrentServer(); }
+
+	private static ResourceLocation asRoomId(String id) { return new ResourceLocation(Hyperbox.MODID,"rooms/"+id); }
+
+	private void copyFullTemplateWorld(ServerLevel lvl,String folder) {
 		MinecraftServer srv = lvl.getServer();
 		Path root = srv.getWorldPath(LevelResource.ROOT);
 		Path src = Path.of("config/hyperbox_templates").resolve(folder);
@@ -272,84 +299,21 @@ public class HyperboxChunkGenerator extends ChunkGenerator {
 		try {
 			Path dst = root.resolve("dimensions").resolve(Hyperbox.MODID).resolve(lvl.dimension().location().getPath());
 			Files.createDirectories(dst);
-			for (String dir : List.of("region", "entities")) {
+			for (String dir : List.of("region","entities")) {
 				Path s = src.resolve(dir);
 				if (!Files.exists(s)) continue;
 				Path d = dst.resolve(dir);
 				Files.createDirectories(d);
 				try (Stream<Path> stream = Files.walk(s)) {
-					stream.forEach(p -> {
+					stream.forEach(p->{
 						try {
 							Path q = d.resolve(s.relativize(p));
 							if (Files.isDirectory(p)) Files.createDirectories(q);
-							else if (p.toString().endsWith(".mca")) Files.copy(p, q, StandardCopyOption.REPLACE_EXISTING);
-						} catch (IOException ignored) {
-						}
+							else if (p.toString().endsWith(".mca")) Files.copy(p,q,StandardCopyOption.REPLACE_EXISTING);
+						} catch (IOException ignored) {}
 					});
 				}
 			}
-		} catch (IOException ignored) {
-		}
-	}
-
-	private static void markChunks(Set<ChunkPos> set, BlockPos org, Vec3i size) {
-		int minCX = org.getX() >> 4;
-		int minCZ = org.getZ() >> 4;
-		int maxCX = (org.getX() + size.getX() - 1) >> 4;
-		int maxCZ = (org.getZ() + size.getZ() - 1) >> 4;
-		for (int cx = minCX; cx <= maxCX; cx++) for (int cz = minCZ; cz <= maxCZ; cz++) set.add(new ChunkPos(cx, cz));
-	}
-
-	private static boolean intersects(Set<ChunkPos> set, BlockPos org, Vec3i size) {
-		int minCX = org.getX() >> 4;
-		int minCZ = org.getZ() >> 4;
-		int maxCX = (org.getX() + size.getX() - 1) >> 4;
-		int maxCZ = (org.getZ() + size.getZ() - 1) >> 4;
-		for (int cx = minCX; cx <= maxCX; cx++) for (int cz = minCZ; cz <= maxCZ; cz++) if (set.contains(new ChunkPos(cx, cz))) return true;
-		return false;
-	}
-
-	private static void sealBox(ServerLevel l, Set<ChunkPos> occ) {
-		int minCX = Integer.MAX_VALUE;
-		int minCZ = Integer.MAX_VALUE;
-		int maxCX = Integer.MIN_VALUE;
-		int maxCZ = Integer.MIN_VALUE;
-		for (ChunkPos cp : occ) {
-			if (cp.x < minCX) minCX = cp.x;
-			if (cp.z < minCZ) minCZ = cp.z;
-			if (cp.x > maxCX) maxCX = cp.x;
-			if (cp.z > maxCZ) maxCZ = cp.z;
-		}
-		int minX = minCX * 16;
-		int minZ = minCZ * 16;
-		int maxX = maxCX * 16 + 15;
-		int maxZ = maxCZ * 16 + 15;
-		int minY = l.getMinBuildHeight();
-		int maxY = l.getMaxBuildHeight() - 1;
-		for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
-			l.setBlock(new BlockPos(x, minY, z), Blocks.BEDROCK.defaultBlockState(), 3);
-			l.setBlock(new BlockPos(x, maxY, z), Blocks.BEDROCK.defaultBlockState(), 3);
-		}
-		for (int y = minY; y <= maxY; y++) {
-			for (int x = minX; x <= maxX; x++) {
-				l.setBlock(new BlockPos(x, y, minZ), Blocks.BEDROCK.defaultBlockState(), 3);
-				l.setBlock(new BlockPos(x, y, maxZ), Blocks.BEDROCK.defaultBlockState(), 3);
-			}
-			for (int z = minZ; z <= maxZ; z++) {
-				l.setBlock(new BlockPos(minX, y, z), Blocks.BEDROCK.defaultBlockState(), 3);
-				l.setBlock(new BlockPos(maxX, y, z), Blocks.BEDROCK.defaultBlockState(), 3);
-			}
-		}
-	}
-
-	private static void loadChunksForTemplate(ServerLevel lvl, BlockPos origin, Vec3i size) {
-		int minCX = (origin.getX() - 16) >> 4;
-		int minCZ = (origin.getZ() - 16) >> 4;
-		int maxCX = (origin.getX() + size.getX() + 15) >> 4;
-		int maxCZ = (origin.getZ() + size.getZ() + 15) >> 4;
-		for (int cx = minCX; cx <= maxCX; cx++) for (int cz = minCZ; cz <= maxCZ; cz++) {
-			lvl.setChunkForced(cx, cz, true);
-			lvl.getChunk(cx, cz);
-		}
+		} catch (IOException ignored) {}
 	}
 }
