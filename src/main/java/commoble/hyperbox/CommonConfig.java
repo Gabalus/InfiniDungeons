@@ -1,6 +1,5 @@
 package commoble.hyperbox;
 
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraftforge.common.ForgeConfigSpec;
@@ -10,12 +9,36 @@ import java.util.*;
 public class CommonConfig
 {
 	public final ForgeConfigSpec.ConfigValue<Boolean> autoForceHyperboxChunks;
+	public final ForgeConfigSpec.ConfigValue<Boolean> spawnNaturalDiscords;
+	public final ForgeConfigSpec.ConfigValue<Boolean> protectDiscordBlocks;
+	public final ForgeConfigSpec.IntValue naturalDiscordIntervalDays;
+	public final ForgeConfigSpec.IntValue naturalDiscordMinSpawnDistance;
 
 	public CommonConfig(ForgeConfigSpec.Builder b)
 	{
 		autoForceHyperboxChunks = b
 				.comment("Keep interior chunks force-loaded while parent chunk is loaded")
 				.define("auto_force_hyperbox_chunks", false);
+
+		b.push("discords");
+
+		spawnNaturalDiscords = b
+				.comment("If true, the server periodically opens one natural Discord rift near world spawn.")
+				.define("spawn_natural_rifts", true);
+
+		protectDiscordBlocks = b
+				.comment("If true, players cannot break/place blocks or grief with explosions/fluids inside Discord dimensions.")
+				.define("protect_blocks", true);
+
+		naturalDiscordIntervalDays = b
+				.comment("How many Minecraft days must pass between natural Discord rift openings.")
+				.defineInRange("natural_rift_interval_days", 1, 1, 365);
+
+		naturalDiscordMinSpawnDistance = b
+				.comment("Minimum horizontal distance from world spawn for natural Discord rifts. The MVP still uses spawn X/Z and this value is reserved for the next worldgen pass.")
+				.defineInRange("natural_rift_min_spawn_distance", 500, 0, 30000000);
+
+		b.pop();
 	}
 
 	public Map<String, Map<String, List<String>>> collectThemePools(MinecraftServer srv)
