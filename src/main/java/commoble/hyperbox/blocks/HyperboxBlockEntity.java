@@ -1,6 +1,8 @@
 package commoble.hyperbox.blocks;
 
 import commoble.hyperbox.Hyperbox;
+import commoble.hyperbox.api.discord.DiscordEnteredEvent;
+import commoble.hyperbox.api.discord.DiscordMetadata;
 import commoble.hyperbox.dimension.*;
 import commoble.infiniverse.api.InfiniverseAPI;
 import net.minecraft.core.BlockPos;
@@ -21,6 +23,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.util.LazyOptional;
 
@@ -196,6 +199,7 @@ public class HyperboxBlockEntity extends BlockEntity implements Nameable {
 		if (HyperboxDimension.getDimensionType(server) != overworld.dimensionType())
 			player.getCapability(ReturnPointCapability.INSTANCE).ifPresent(c -> c.setReturnPoint(overworld.dimension(), getBlockPos()));
 		BlockPos spawn = wd.getSpawnPoint().orElse(HyperboxChunkGenerator.CENTER.above());
+		MinecraftForge.EVENT_BUS.post(new DiscordEnteredEvent(player, DiscordMetadata.of(dungeon, wd)));
 		DelayedTeleportData.getOrCreate(overworld).schedulePlayerTeleport(player, dungeon.dimension(), Vec3.atCenterOf(spawn));
 	}
 

@@ -1,11 +1,14 @@
 package commoble.hyperbox.discord;
 
+import commoble.hyperbox.api.discord.DiscordCompletedEvent;
+import commoble.hyperbox.api.discord.DiscordMetadata;
 import commoble.hyperbox.dimension.HyperboxWorldData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraftforge.common.MinecraftForge;
 
 public final class DiscordRewards {
 	private DiscordRewards() {}
@@ -23,6 +26,7 @@ public final class DiscordRewards {
 		}
 
 		data.setDiscordCompleted(true);
+		MinecraftForge.EVENT_BUS.post(new DiscordCompletedEvent(player, DiscordMetadata.of(player.serverLevel(), data)));
 		giveMvpRewards(player, data);
 		player.sendSystemMessage(Component.literal("Discord stabilized. Rewards granted.").withStyle(ChatFormatting.LIGHT_PURPLE));
 		return 1;
