@@ -1,6 +1,7 @@
 package commoble.hyperbox.dimension;
 
 import commoble.hyperbox.Hyperbox;
+import commoble.hyperbox.api.discord.DiscordWorldDataView;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -11,7 +12,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 
-public class HyperboxWorldData extends SavedData {
+public class HyperboxWorldData extends SavedData implements DiscordWorldDataView {
 	private static final String PENDING = "pending";
 	private static final String GENERATED = "generated";
 	private static final String PARENT_WORLD = "parent_world";
@@ -84,8 +85,8 @@ public class HyperboxWorldData extends SavedData {
 	public boolean isGenerated() { return generated; }
 	public void setPending(boolean b) { pending = b; setDirty(); }
 	public void setGenerated(boolean b) { generated = b; setDirty(); }
-	public ResourceKey<Level> getParentWorld() { return parentWorld; }
-	public BlockPos getParentPos() { return parentPos; }
+	@Override public ResourceKey<Level> getParentWorld() { return parentWorld; }
+	@Override public BlockPos getParentPos() { return parentPos; }
 
 	public void setWorldPos(MinecraftServer srv, ServerLevel thisWorld, ResourceKey<Level> thisKey, ResourceKey<Level> parentKey, BlockPos parentPosIn, int color) {
 		parentWorld = parentKey;
@@ -98,10 +99,12 @@ public class HyperboxWorldData extends SavedData {
 		setDirty();
 	}
 
+	@Override
 	public java.util.Optional<BlockPos> getSpawnPoint() {
 		return java.util.Optional.ofNullable(spawnPoint);
 	}
 
+	@Override
 	public String getDiscordTheme() {
 		return discordTheme;
 	}
@@ -111,6 +114,7 @@ public class HyperboxWorldData extends SavedData {
 		setDirty();
 	}
 
+	@Override
 	public int getDiscordTier() {
 		return discordTier;
 	}
@@ -120,6 +124,7 @@ public class HyperboxWorldData extends SavedData {
 		setDirty();
 	}
 
+	@Override
 	public boolean isDiscordCompleted() {
 		return discordCompleted;
 	}
@@ -129,6 +134,7 @@ public class HyperboxWorldData extends SavedData {
 		setDirty();
 	}
 
+	@Override
 	public boolean isDiscordCreatedByPlayer() {
 		return discordCreatedByPlayer;
 	}
@@ -138,6 +144,7 @@ public class HyperboxWorldData extends SavedData {
 		setDirty();
 	}
 
+	@Override
 	public String getDiscordSource() {
 		return discordSource;
 	}
